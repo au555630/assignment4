@@ -1,0 +1,1161 @@
+---
+title: "Assignment 4 - Coordinating Heart Rate"
+author: "Riccardo Fusaroli"
+date: "November 6, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## Analysing Heart Rate and Respiration data
+
+The goal of this assignment is to first familiarize you with heart rate, and respiration data and their preprocessing. The second part explores how to analyze interpersonal coordination of these signals.
+
+These are the questions you need to be able to answer at the end of the assignment (aka that you need to submit as part of the portfolio)
+
+1) How do you preprocess heart rate and respiration data? Describe the process. If any data needs to be excluded, list the excluded data and motivate the exclusion.
+
+2) Do you observe interpersonal coordination in heart rate and respiration? Describe your control baseline, the method used to quantify coordination, and the statistical models used to infer whether coordination was higher than in the baseline. Report the results of the models.
+
+3) Do you observe differences in coordination between conditions? Report the models and results.
+
+4) Is respiration coordination a likely driver of heart rate coordination? Describe how you would test for it. Bonus points if you actually run the tests and report methods and results.
+
+N.B. to give you a bit more data I included data from last year (Study1) and from your class (Study2). Note that synchronouns and turn-taking are the same across both studies, but the third condition is different: last year it was self-paced joint reading; this year it was the tv-series conversation. So you might want to exclude the self-paced reading (but, up to you!)
+
+## Step by step suggestions to solve the assignment
+
+
+### Exploring physiological signals
+
+- Choose one pair (one pair, three conditions)
+- Load the logs
+```{r}
+pair6_con1=read.csv("cleandata/Study2_G6_T1_TurnTaking.csv")
+pair6_con2=read.csv("cleandata/Study2_G6_T2_Conversation.csv")
+pair6_con3=read.csv("cleandata/Study2_G6_T3_Synchronous.csv")
+```
+
+
+- Produce a plot of the participants' respiration signal and a different one of the participants' HR signal (for inspecting whether the data is usable)
+  N.B: remember the slides: artifacts, downsampling, scaling.
+  N.B. The gridExtra::grid.arrange() function allows you to display the plots side by side. E.g. grid.arrange(plot1, plot2, plot3, ncol=3)
+  
+```{r}
+
+#remove outliers
+
+removeOuts <- function(ts,threshold){
+  ts[ts > (mean(ts,na.rm=T) +
+          (threshold*sd(ts,na.rm=T))) |
+     ts < (mean(ts,na.rm=T) -
+          (threshold*sd(ts,na.rm=T)))] =
+  mean(ts,na.rm=T)   
+  return(ts)
+  }
+
+threshold=1.5
+pair6_con1$HR1=removeOuts(pair6_con1$HR1,threshold)
+pair6_con2$HR1=removeOuts(pair6_con2$HR1,threshold) 
+pair6_con3$HR1=removeOuts(pair6_con3$HR1,threshold)
+
+pair6_con1$HR2=removeOuts(pair6_con1$HR2,threshold)
+pair6_con2$HR2=removeOuts(pair6_con2$HR2,threshold) 
+pair6_con3$HR2=removeOuts(pair6_con3$HR2,threshold)
+
+pair6_con1$Resp1=removeOuts(pair6_con1$Resp1,threshold)
+pair6_con2$Resp1=removeOuts(pair6_con2$Resp1,threshold) 
+pair6_con3$Resp1=removeOuts(pair6_con3$Resp1,threshold)
+
+pair6_con1$Resp2=removeOuts(pair6_con1$Resp2,threshold)
+pair6_con2$Resp2=removeOuts(pair6_con2$Resp2,threshold) 
+pair6_con3$Resp2=removeOuts(pair6_con3$Resp2,threshold)
+
+
+#downsampling
+
+library(groupdata2)
+library(tidyverse)
+d_pair6_con1 = pair6_con1 %>%    
+  group(n= 100, method= 'greedy') %>%    
+  dplyr::summarise(
+    time= mean(time,na.rm=T),
+    HR1 = mean(HR1,na.rm=T),
+    HR2 = mean(HR2,na.rm=T),
+    Resp1 = mean(Resp1,na.rm=T),
+    Resp2 = mean(Resp2,na.rm=T))
+
+d_pair6_con2 = pair6_con2 %>%    
+  group(n= 100, method= 'greedy') %>%    
+  dplyr::summarise(
+    time= mean(time,na.rm=T),
+    HR1 = mean(HR1,na.rm=T),
+    HR2 = mean(HR2,na.rm=T),
+    Resp1 = mean(Resp1,na.rm=T),
+    Resp2 = mean(Resp2,na.rm=T))
+
+d_pair6_con3 = pair6_con3 %>%    
+  group(n= 100, method= 'greedy') %>%    
+  dplyr::summarise(
+    time= mean(time,na.rm=T),
+    HR1 = mean(HR1,na.rm=T),
+    HR2 = mean(HR2,na.rm=T),
+    Resp1 = mean(Resp1,na.rm=T),
+    Resp2 = mean(Resp2,na.rm=T))
+
+
+#scaling
+
+d_pair6_con1$Resp1S=scale(d_pair6_con1$Resp1)
+d_pair6_con1$Resp2S=scale(d_pair6_con1$Resp2)
+d_pair6_con1$HR1S=scale(d_pair6_con1$HR1) 
+d_pair6_con1$HR2S=scale(d_pair6_con1$HR2)
+
+d_pair6_con2$Resp1S=scale(d_pair6_con2$Resp1)
+d_pair6_con2$Resp2S=scale(d_pair6_con2$Resp2)
+d_pair6_con2$HR1S=scale(d_pair6_con2$HR1) 
+d_pair6_con2$HR2S=scale(d_pair6_con2$HR2)
+
+d_pair6_con3$Resp1S=scale(d_pair6_con3$Resp1)
+d_pair6_con3$Resp2S=scale(d_pair6_con3$Resp2)
+d_pair6_con3$HR1S=scale(d_pair6_con3$HR1) 
+d_pair6_con3$HR2S=scale(d_pair6_con3$HR2)
+
+#plot
+library(ggplot2)
+
+#heartrate
+
+con1_plot=ggplot(d_pair6_con1, aes(x=time, y=HR1S)) +
+  geom_line() +
+  geom_line(aes(x=time, y=HR2S), colour="red")
+con1_plot
+
+con2_plot=ggplot(d_pair6_con2, aes(x=time, y=HR1S)) +
+  geom_line() +
+  geom_line(aes(x=time, y=HR2S), colour="red")
+con2_plot
+
+con3_plot=ggplot(d_pair6_con3, aes(x=time, y=HR1S)) +
+  geom_line() +
+  geom_line(aes(x=time, y=HR2S), colour="red")
+con3_plot
+
+gridExtra::grid.arrange(con1_plot, con2_plot, con3_plot, ncol=3)
+
+#breathing
+
+con1_B_plot=ggplot(d_pair6_con1, aes(x=time, y=Resp1S)) +
+  geom_line() +
+  geom_line(aes(x=time, y=Resp2S), colour="red")
+con1_plot
+
+con2_B_plot=ggplot(d_pair6_con2, aes(x=time, y=Resp1S)) +
+  geom_line() +
+  geom_line(aes(x=time, y=Resp2S), colour="red")
+con2_plot
+
+con3_B_plot=ggplot(d_pair6_con3, aes(x=time, y=Resp1S)) +
+  geom_line() +
+  geom_line(aes(x=time, y=Resp2S), colour="red")
+con3_plot
+
+gridExtra::grid.arrange(con1_B_plot, con2_B_plot, con3_B_plot, ncol=3)
+
+```
+
+  
+- Can you eye-ball which condition if any displays more physiological coordination?
+
+There's no coordination for heartrate, condition "syncronous", or the data has problems.
+
+- Run crqa on heart rate and respiration data (find parameters, run crqa)
+
+Heart rate
+```{r}
+library(crqa)
+#Finding the optimal parameters: 
+par = list(lgM =  50, steps = seq(1, 6, 1),  radiusspan = 100,  radiussample = 40, normalize = 0,  rescale = 0,  mindiagline = 2,  minvertline = 2,  tw = 0,  whiteline = FALSE,  recpt = FALSE,  fnnpercent = 10,  typeami = "mindip") 
+
+ans= optimizeParam(d_pair6_con1$HR1S, d_pair6_con1$HR2S, par, min.rec= 3.5, max.rec= 4.5)
+
+#Choose a common value for delay, emb.dim and radius
+Results=crqa (d_pair6_con1$HR1S, d_pair6_con1$HR2S, delay=45, embed=3, radius=1, normalize=0,rescale=0,mindiagline = 2,minvertline = 2)
+
+#Represent the plot:
+RP=Results$RP
+RP = matrix(as.numeric(RP), nrow = ncol(RP))
+cols = c("white","blue4")
+image(RP, xlab = "", ylab = "", col = cols)
+
+```
+
+Breathing
+```{r}
+library(crqa)
+#Finding the optimal parameters: 
+par = list(lgM =  50, steps = seq(1, 6, 1),  radiusspan = 100,  radiussample = 40, normalize = 0,  rescale = 0,  mindiagline = 2,  minvertline = 2,  tw = 0,  whiteline = FALSE,  recpt = FALSE,  fnnpercent = 10,  typeami = "mindip") 
+
+ans= optimizeParam(d_pair6_con1$Resp1S, d_pair6_con1$Resp2S, par, min.rec= 3.5, max.rec= 4.5)
+
+#Choose a common value for delay, emb.dim and radius
+Results=crqa (d_pair6_con1$Resp1S, d_pair6_con1$Resp2S, delay=45, embed=3, radius=1, normalize=0,rescale=0,mindiagline = 2,minvertline = 2)
+#Represent the plot:
+RP=Results$RP
+RP = matrix(as.numeric(RP), nrow = ncol(RP))
+cols = c("white","blue4")
+image(RP, xlab = "", ylab = "", col = cols)
+
+```
+
+- Does this tell you more than just eyeballing the plots?
+
+### Systematically pre-process the data
+- Loop through all the files (either with a loop or with a function), check which files should be excluded, if any, and save the pre-processed time-series. Tip: plot and visually inspect the data to figure out which should be excluded.
+
+```{r functions}
+library(groupdata2)
+library(tidyverse)
+library(ggplot2)
+
+rm_outliers= function(alma){
+  
+  #remove outliers
+
+  removeOuts <- function(ts,threshold){
+    ts[ts > (mean(ts,na.rm=T) +
+            (threshold*sd(ts,na.rm=T))) |
+       ts < (mean(ts,na.rm=T) -
+            (threshold*sd(ts,na.rm=T)))] =
+    mean(ts,na.rm=T)   
+    return(ts)
+    }
+  
+  threshold=1.5
+  
+  alma$HR1=removeOuts(alma$HR1,threshold)
+  alma$HR2=removeOuts(alma$HR2,threshold)
+  alma$Resp1=removeOuts(alma$Resp1,threshold)
+  alma$Resp2=removeOuts(alma$Resp2,threshold)
+  
+  
+  return(alma)
+  
+}
+
+downsample= function(alma){
+  
+  #downsampling
+
+  alma = alma %>%    
+    group(n= 100, method= 'greedy') %>%    
+    dplyr::summarise(
+      time= mean(time,na.rm=T),
+      HR1 = mean(HR1,na.rm=T),
+      HR2 = mean(HR2,na.rm=T),
+      Resp1 = mean(Resp1,na.rm=T),
+      Resp2 = mean(Resp2,na.rm=T))
+  
+  return(alma)
+}  
+
+scaling= function(alma){
+  #scaling
+  
+  alma$Resp1S=scale(alma$Resp1)
+  alma$Resp2S=scale(alma$Resp2)
+  alma$HR1S=scale(alma$HR1) 
+  alma$HR2S=scale(alma$HR2)
+  
+  return(alma)
+}
+
+# see=rm_outliers(pair6_con1)
+# see=downsample(see)
+# see=scaling(see)
+
+#create function that has all the little ones inside to preprocess the data
+preprocess=function(data) {
+  final=rm_outliers(data) 
+  final= downsample(final)
+  final= scaling(final)
+  return(final)
+}
+
+
+#get the info from filenames
+
+#save the original code for reference
+#library(magrittr)
+# string="cleandata/Study2_G6_T1_TurnTaking.csv"
+# pattern="[[:punct:]]" #regex for punctuation so I'll split the string by underscores
+# name= string %>% stringr::str_split(pattern) %>% unlist()
+# name[5]
+
+
+get_name= function(string) {
+  
+  pattern="[[:punct:]]" #regex for punctuation so I'll split the string by underscores
+  name= unlist(stringr::str_split(string, pattern))
+  study= name[2]
+  group_1=name[3]
+  trial=name[4]
+  condition= name[5]
+
+  basic= data.frame(study, group, trial, condition) #save them to a dataframe
+  return(basic)
+}
+
+#naem=get_name("cleandata/Study2_G6_T1_TurnTaking.csv") #works
+
+get_name_sur= function(string) {
+  
+  pattern="[[:punct:]]" #regex for punctuation so I'll split the string by underscores
+  name= unlist(stringr::str_split(string, pattern))
+  study= name[2]
+  group_1=unlist(stringr::str_extract_all(name[3], "\\d+"))
+  group_2=unlist(stringr::str_extract_all(name[4], "\\d+"))
+  combination= unlist(stringr::str_extract_all(name[4], "[a-z]"))
+  condition= name[5]
+
+  basic= data.frame(study, group_1, group_2, combination, condition) #save them to a dataframe
+  return(basic)
+}
+
+
+```
+
+
+
+```{r plot function}
+library(ggplot2)
+
+plotting_HR = function (data) {
+  #plot HRs
+  HR = ggplot(data, aes(x = time)) +
+    geom_line(aes(y = HR1S), colour = "red") +
+    geom_line(aes(y = HR2S)) 
+  
+  return(HR)
+}
+
+plotting_Resp = function(data) {
+  #plot Respirations
+  Resp=ggplot(data,aes(x=time))+
+    geom_line(aes(y=Resp1S),colour="red")+
+    geom_line(aes(y=Resp2S))
+  
+  return(Resp)
+}
+
+#plotting_HR(see)
+#plotting_Resp(see)
+
+
+file_list = list.files(path= "new_cleandata", full.names=T)
+for (x in file_list){
+  y=read.csv(x)
+  
+  less= substring(x, 14, 50)
+  ido= unlist(regmatches(less, regexec("/(.+).csv", less)))
+  nombre= ido[2]
+  heart=plotting_HR(y)
+  nombre=paste("plot_heart", nombre, ".png", sep= "_") 
+  ggsave(nombre, plot=heart, device = "png")
+  
+  lessy= substring(x, 14, 50)
+  odi= unlist(regmatches(lessy, regexec("/(.+).csv", lessy)))
+  nev= odi[2]
+  resp=plotting_Resp(y)
+  nev=paste("plot_resp", nev, ".png", sep= "_")
+  ggsave(nev, plot=resp, device = "png")
+  
+}
+
+# basic="new_cleandata/new_Study2_G9_T10_apple.csv"
+# nombre= substring(basic, 14, 50)
+# ido= unlist(regmatches(nombre, regexec("/(.+).csv", nombre)))
+# nombre= ido[2]
+
+```
+
+
+```{r create new_data}
+
+file_list = list.files(path= "cleandata", full.names=T) # this is a list with the names of the files
+
+store=data.frame() #create empty dataframe to store data
+
+
+#loop through all the files
+for (i in file_list){
+  basic=get_name(i) #get out the info from the name
+  nuevo= "new"
+  nombre= substring(i, 11, 50) #save the name of the file
+  nuevo_nombre=paste(nuevo, nombre, sep= "_") #save the name of the file with "new" written before it
+  duck=read.csv(i)  
+  done=preprocess(duck) 
+  whole= cbind(basic, done) 
+  write.csv(whole, file = nuevo_nombre, row.names = F) #write to csv to create the new file
+  whole=data.frame() #empty the dataframe to use it again
+}
+
+```
+
+
+- Run crqa on all the pre-processed time-series and save the output (don't forget to add columns with study, group, condition and trial). Tip: remember to first assess optimal parameters (dimensions, delay, radius) across all timeseries. Tip: it will often fail, just take whatever parameters you get, select optimal across timeseries parameters and run crqa on all timeseries with those. Tip: double check the rr. When I ran the loop, I got very low rr, so I adjusted the radius until the average of rr across all pairs was approx. 4%.
+
+```{r optimizeParam functions}
+
+library(crqa)
+
+
+cerka_heart=function(alma) {
+  par = list(lgM =  50, steps = seq(1, 6, 1),  radiusspan = 100,  radiussample = 40, normalize = 0,  rescale = 0,  mindiagline = 2,  minvertline = 2,  tw = 0,  whiteline = FALSE,  recpt = FALSE,  fnnpercent = 10,  typeami = "mindip") 
+  
+  ans= optimizeParam(alma$HR1S, alma$HR2S, par, min.rec= 3.5, max.rec= 4.5)
+  
+  if (is.null(ans)) {          
+    ans=haz_empty()                
+  }
+  
+  return(ans)
+}
+
+cerka_resp=function(alma) {
+  par = list(lgM =  50, steps = seq(1, 6, 1),  radiusspan = 100,  radiussample = 40, normalize = 0,  rescale = 0,  mindiagline = 2,  minvertline = 2,  tw = 0,  whiteline = FALSE,  recpt = FALSE,  fnnpercent = 10,  typeami = "mindip") 
+  
+  ans= optimizeParam(alma$Resp1S, alma$Resp2S, par, min.rec= 3.5, max.rec= 4.5)
+  
+  if (is.null(ans)) {          
+    ans=haz_empty()                
+  }
+  
+  
+  return(ans)
+}
+
+haz_empty=function(){
+    delay=NA
+    emddim=NA
+    radius=NA
+    empty= data.frame(delay, emddim, radius)
+    return(empty)
+  }
+
+
+# stupid=read.csv("new_cleandata/new_Study2_G9_T3_TurnTaking.csv")
+# 
+# heart_par= cerka_heart(stupid)
+# if (is.null(heart_par)) {
+#   heart_par=haz_empty()
+# }
+# 
+# resp_par= cerka_resp(stupid)
+# if (is.null(resp_par)) {
+#   resp_par=haz_empty()
+#   }
+
+
+
+
+```
+
+
+```{r param loop} 
+
+file_list = list.files(path= "new_cleandata", full.names=T) # this is a list with the names of the files
+
+#heart rate
+param_heart=data.frame()
+param_resp= data.frame()
+
+for (i in file_list){
+  duck=read.csv(i)  
+  hr=try(cerka_heart(duck), silent = T)
+  param_heart= rbind(param_heart, hr) 
+  re=try(cerka_resp(duck), silent = T) 
+  param_resp= rbind(param_resp, re)
+  
+}
+
+```
+
+
+```{r param results}
+
+param_heart=na.omit(param_heart)
+param_resp=na.omit(param_resp)
+
+param_heart$delay= as.numeric(param_heart$delay)
+param_heart$emddim= as.numeric(param_heart$emddim)
+param_heart$radius= as.numeric(param_heart$radius)
+
+param_resp$delay= as.numeric(param_resp$delay)
+param_resp$emddim= as.numeric(param_resp$emddim)
+param_resp$radius= as.numeric(param_resp$radius)
+
+param_heart=na.omit(param_heart)
+param_resp=na.omit(param_resp)
+
+delay_h= median(param_heart$delay)
+emddim_h= median(param_heart$emddim)
+radius_h= median(param_heart$radius)
+
+delay_r= median(param_resp$delay)
+emddim_r= median(param_resp$emddim)
+radius_r= median(param_resp$radius)
+
+#after trial and error, correction of the radious so RR is around 4
+radius_h= radius_h * 1.4
+radius_r= radius_r * 1.05
+
+parameter_heart=c(delay_h, emddim_h, radius_h)
+parameter_resp=c(delay_r, emddim_r, radius_r)
+
+write.csv(parameter_heart, file= "param_heart.csv", row.names = F)
+write.csv(parameter_resp, file= "param_resp.csv", row.names = F)
+
+parameter_heart=read.csv("param_heart.csv")
+parameter_resp=read.csv("param_resp.csv")
+
+parameter_heart
+parameter_resp 
+
+# #little code for correction of RR
+# heart_normal=read.csv("heart_normal.csv")
+# resp_normal= read.csv("resp_normal.csv")
+# entre=mean(na.omit(heart_normal$RR)) # 0.707 *1.35= 3.31 ; *1.4= 3.97
+# kozte=mean(na.omit(resp_normal$RR)) # 3.747 *1.1 = 4.48 ; *1.05 = 4.11
+# entre=sd(na.omit(heart_normal$RR)) # 0.87 #2.364 #2.6
+# kozte=sd(na.omit(resp_normal$RR)) #0.54 #61 #0.57
+# entre=range(na.omit(heart_normal$RR)) #0.053 3.556 #9.872 - 0.844
+# kozte=range(na.omit(resp_normal$RR)) #3.050 5.126
+# 
+# 
+# #little code for correction of RR
+# e=read.csv("heart_shuffled.csv")
+# l= read.csv("resp_shuffled.csv")
+# entre=mean(na.omit(e$RR)) # 0.124 (original * 1.4)
+# kozte=mean(na.omit(l$RR)) # 3.69 (original*1.05)
+
+```
+
+```{r crqa functions}
+
+crqa_heart=function(alma) {
+  adat=read.csv(alma)
+  Results=crqa (adat$HR1S, adat$HR2S, delay=delay_h, embed=emddim_h, radius=radius_h, normalize=0,rescale=0,mindiagline = 2,minvertline = 2)
+  
+  RR= Results$RR
+  DET= Results$DET
+  maxL=Results$maxL
+  L=Results$L
+  ENTR=Results$ENTR
+  LAM=Results$LAM
+  TT=Results$TT
+  
+  study= unique(adat$study)
+  group=unique(adat$group)
+  trial=unique(adat$trial)
+  condition= unique(adat$condition)
+
+  basic= data.frame(study, group, trial, condition) 
+  
+  crqa=data.frame(RR, DET, maxL, L, ENTR, LAM, TT)
+  
+  final_heart=merge(basic, crqa)
+  
+  return(final_heart)
+
+}
+
+crqa_resp=function(alma) {
+  adat=read.csv(alma)
+  Results=crqa (adat$Resp1S, adat$Resp2S, delay=delay_r, embed=emddim_r, radius=radius_r, normalize=0,rescale=0,mindiagline = 2,minvertline = 2)
+  
+  RR= Results$RR
+  DET= Results$DET
+  maxL=Results$maxL
+  L=Results$L
+  ENTR=Results$ENTR
+  LAM=Results$LAM
+  TT=Results$TT
+  
+  study= unique(adat$study)
+  group=unique(adat$group)
+  trial=unique(adat$trial)
+  condition= unique(adat$condition)
+
+  basic= data.frame(study, group, trial, condition) 
+  
+  crqa=data.frame(RR, DET, maxL, L, ENTR, LAM, TT)
+  
+  final_resp=merge(basic, crqa)
+  
+  return(final_resp)
+
+}
+
+#test
+# ghost=crqa_heart("new_cleandata/new_Study2_G9_T3_TurnTaking.csv")
+# monster=crqa_resp("new_cleandata/new_Study2_G9_T3_TurnTaking.csv")
+
+```
+
+```{r crqa loop for normal}
+file_list = list.files(path= "new_cleandata", full.names=T) 
+
+#heart rate
+heart_normal=data.frame()
+resp_normal= data.frame()
+
+for (i in file_list){
+  hr=crqa_heart(i)
+  heart_normal= rbind(heart_normal, hr)
+  re=crqa_resp(i)
+  resp_normal= rbind(resp_normal, re)
+  
+}
+
+write.csv(heart_normal, file="heart_normal.csv", row.names = F)
+write.csv(resp_normal, file="resp_normal.csv", row.names = F)
+
+
+```
+
+### Creating controls: shuffled controls
+ - loop through all pairs and conditions
+ - shuffle the timeseries (take a timeseries and rearrange its values in a random order). Tip check the sample() function
+ 
+ - run crqa and save the output. NB. which delay, embed, radius parameters should you use?
+ - statistically compare the crqa indexes in real and shuffled pairs
+ 
+ 
+```{r data for shuffled}
+
+#function to create shuffles variables
+shuffle= function(alma) {
+  alma$HR1S= sample(alma$HR1S) 
+  alma$HR2S= sample(alma$HR2S) 
+  alma$Resp1S= sample(alma$Resp1S)
+  alma$Resp2S= sample(alma$Resp2S)
+  return(alma)
+}
+
+#loop to shuffle all files (create new, shuffled files)
+file_list = list.files(path= "new_cleandata", full.names=T)
+
+for (i in file_list){
+  nombre= substring(i, 15, 50) 
+  nuevo_nombre=paste("shuffled", nombre, sep= "_") 
+  duck=read.csv(i)  
+  done=shuffle(duck)
+  write.csv(done, file = nuevo_nombre, row.names = F) 
+}
+```
+
+```{r crqa loop for shuffled}
+#loop for crqa of shuffled files
+file_list = list.files(path= "shuffled_data", full.names=T)
+
+
+heart_shuffled=data.frame()
+resp_shuffled= data.frame()
+
+for (i in file_list){
+  hr=crqa_heart(i)
+  heart_shuffled= rbind(heart_shuffled, hr)
+  re=crqa_resp(i)
+  resp_shuffled= rbind(resp_shuffled, re)
+
+}
+
+write.csv(heart_shuffled, file="heart_shuffled.csv", row.names = F)
+write.csv(resp_shuffled, file="resp_shuffled.csv", row.names = F)
+
+```
+
+
+```{r}
+#read in files
+heart_normal=read.csv("heart_normal.csv")
+resp_normal= read.csv("resp_normal.csv")
+heart_shuffled= read.csv("heart_shuffled.csv")
+resp_shuffled= read.csv("resp_shuffled.csv")
+
+```
+
+
+Statistically compare...
+
+```{r}
+
+heart_normal$type= factor("normal")
+resp_normal$type= factor("normal")
+heart_shuffled$type= factor("shuffled")
+resp_shuffled$type= factor("shuffled")
+
+#found this too late, might have been good
+# When you supply a column name with the `.id` argument, a new
+# column is created to link each row to its original data frame
+#dplyr::bind_rows(list(one, two), .id = "id")
+#bind_rows("group 1" = one, "group 2" = two, .id = "groups")
+
+heart_normal_shuffled= rbind(heart_shuffled, heart_normal)
+resp_normal_shuffled= rbind(resp_shuffled, resp_normal)
+
+#relevel to have normal as baseline
+heart_normal_shuffled$type= relevel(heart_normal_shuffled$type, "normal", "shuffled")
+resp_normal_shuffled$type= relevel(resp_normal_shuffled$type, "normal", "shuffled")
+
+library(lmerTest)
+
+RR_h_lmer1=lmer(RR ~ type + (1|group), heart_normal_shuffled)
+RR_r_lmer1=lmer(RR ~ type + (1|group), resp_normal_shuffled)
+
+summary(RR_h_lmer1) #significant  -3.8562     0.4603 35.2500  -8.378 6.64e-10
+summary(RR_r_lmer1) #significant -0.4195     0.1301 34.6800  -3.225  0.00275
+
+DET_h_lmer1=lmer(DET ~ type + (1|group), heart_normal_shuffled)
+DET_r_lmer1=lmer(DET ~ type + (1|group), resp_normal_shuffled)
+
+summary(DET_h_lmer1) #-94.0336     0.7159  25.8090  -131.3  < 2e-16
+summary(DET_r_lmer1) #-65.269      1.509  35.560  -43.27   <2e-16
+
+LAM_h_lmer1=lmer(LAM ~ type + (1|group), heart_normal_shuffled)
+LAM_r_lmer1=lmer(LAM ~ type + (1|group), resp_normal_shuffled)
+
+summary(LAM_h_lmer1) #-95.9812     0.4436  35.5000  -216.4   <2e-16 
+summary(LAM_r_lmer1) #-75.7001     1.1959  35.1900  -63.30   <2e-16
+
+L_h_lmer1=lmer(L ~ type + (1|group), heart_normal_shuffled)
+L_r_lmer1=lmer(L ~ type + (1|group), resp_normal_shuffled)
+
+summary(L_h_lmer1) #-9.5718     0.6238 35.0600  -15.35  < 2e-16
+summary(L_r_lmer1) # -1.28708    0.10168 35.23000  -12.66 1.15e-14
+
+maxL_h_lmer1=lmer(maxL ~ type + (1|group), heart_normal_shuffled)
+maxL_r_lmer1=lmer(maxL ~ type + (1|group), resp_normal_shuffled)
+
+summary(maxL_h_lmer1) #-192.41      16.58   35.18  -11.61 1.40e-13
+summary(maxL_r_lmer1) #-29.682      1.688  35.380  -17.58  < 2e-16
+
+ENTR_h_lmer1=lmer(ENTR ~ type + (1|group), heart_normal_shuffled)
+ENTR_r_lmer1=lmer(ENTR ~ type + (1|group), resp_normal_shuffled)
+
+summary(ENTR_h_lmer1) #-2.42622    0.07389 25.51100  -32.83  < 2e-16
+summary(ENTR_r_lmer1) #-1.35837    0.04916 35.36000  -27.63   <2e-16
+
+TT_h_lmer1=lmer(TT ~ type + (1|group), heart_normal_shuffled)
+TT_r_lmer1=lmer(TT ~ type + (1|group), resp_normal_shuffled)
+
+summary(TT_h_lmer1) #-12.3219     0.8042  34.2200  -15.32  < 2e-16
+summary(TT_r_lmer1) #-2.1697     0.1633 35.3500  -13.29 2.66e-15
+
+#should be significant, except for RR
+
+```
+
+
+### TRICKY! Creating controls: surrogate pair controls
+ - Per each real pair, identify at least one surrogate pair (matching one of the participants, with somebody doing the same task, but in a different pair). Tip: Celine will share a commented script
+ 
+```{r surrogate pairs}
+
+setwd("/Users/Viki/Documents/egyetem/exp.met/port4/assignment4")
+prepro_filelist = list.files(path="new_cleandata",pattern = "Study1", full.names = T) # load the preprocessed files
+library(stringr)
+
+num=stringr::str_extract_all(prepro_filelist, "\\d+") #extract all numbers in the file name (i.e Study?_G?_T?)
+
+df= as.data.frame(t(as.data.frame(num))) #create a transposed (i.e. "tipped") dataframe of these number
+rownames(df)<-NULL #Remove rownames.
+
+df$V2=as.character(df$V2)
+pairs=as.numeric(unique(df$V2)) #create pairs, i.e. unique group numbers
+
+SurrogateList <- expand.grid(a = pairs, b = pairs) # expand.grid combines all possible combinations of a given vector
+SurrogateList = subset(SurrogateList, a != b) # Ensure that pair 1 (i.e group1) doesn't get paired with it self.
+
+
+# Per each condition
+for (co in c("Synchronous","TurnTaking")){ #loop through a list of condintions #,"SelfPaced"
+  for (i in 1:nrow(SurrogateList)){ #and loop through all the pairings of the surrogate list
+    
+  #start recreate filenames from the working directory based on the matching from the surrogatelist
+  f1=paste0('Study1_G',SurrogateList$a[i]) #Insert group numeber from Surrogatelist #study2_G
+  f2=paste0('Study1_G',SurrogateList$b[i])
+  
+  file1=try(prepro_filelist[grepl(f1,prepro_filelist) & grepl(co, prepro_filelist)]) #insert conditions as well.
+  file2=try(prepro_filelist[grepl(f2,prepro_filelist) & grepl(co,prepro_filelist)])
+  
+  d1=read.csv(file1) #Load the recreated filenames
+  
+  d2=read.csv(file2) 
+  
+  #Ensure both dataframes have the same length
+  if (nrow(d1)>nrow(d2)){
+    d1=d1[1:nrow(d2),]
+  } else {
+    d2=d2[1:nrow(d1),]
+  }
+  
+  #creation of surrogate files. (Riccardo's idea of having fun and completely overdoing it ;-) ) 
+  #per each 2 pairs there are 4 possible surrogate pairs: 
+  #pair1person1 w pair2person2; 
+  d3=data.frame(Resp1=d1$Resp1,Resp2=d2$Resp2,HR1=d1$HR1,HR2=d2$HR2,Resp1S=d1$Resp1S,Resp2S=d2$Resp2S,HR1S=d1$HR1S,HR2S=d2$HR2S)
+  #pair1person2 w pair2person2;
+  d4=data.frame(Resp1=d2$Resp1,Resp2=d1$Resp2,HR1=d2$HR1,HR2=d1$HR2,Resp1S=d2$Resp1S,Resp2S=d1$Resp2S,HR1S=d2$HR1S,HR2S=d1$HR2S)
+  
+  #pair1person1 w pair2person1;
+  d5=data.frame(Resp1=d1$Resp1,Resp2=d2$Resp1,HR1=d1$HR1,HR2=d2$HR1,Resp1S=d1$Resp1S,Resp2S=d2$Resp1S,HR1S=d1$HR1S,HR2S=d2$HR1S)
+  #pair1person2 w pair2person2
+  d6=data.frame(Resp1=d2$Resp2,Resp2=d1$Resp2,HR1=d2$HR2,HR2=d1$HR2,Resp1S=d2$Resp2S,Resp2S=d1$Resp2S,HR1S=d2$HR2S,HR2S=d1$HR2S)
+  
+  #Make filenames that tells which pairs have been mixed
+  file3=paste0("Study1_SurrogateGroup",SurrogateList$a[i],"&",SurrogateList$b[i],"a_",co,".csv") 
+  file4=paste0("Study1_SurrogateGroup",SurrogateList$a[i],"&",SurrogateList$b[i],"b_",co,".csv")
+  file5=paste0("Study1_SurrogateGroup",SurrogateList$a[i],"&",SurrogateList$b[i],"c_",co,".csv")
+  file6=paste0("Study1_SurrogateGroup",SurrogateList$a[i],"&",SurrogateList$b[i],"d_",co,".csv")
+  
+  #write csv files
+  write.csv(d3,file.path("surrogate",file3))
+  write.csv(d4,file.path("surrogate",file4))
+  write.csv(d5,file.path("surrogate",file5))
+  write.csv(d6,file.path("surrogate",file6))
+  }
+}
+
+##NOW DO THE SAME FOR STUDY 2##
+
+setwd("/Users/Viki/Documents/egyetem/exp.met/port4/assignment4")
+prepro_filelist = list.files(path="new_cleandata",pattern = "Study2", full.names = T) # load the preprocessed files
+
+num=stringr::str_extract_all(prepro_filelist, "\\d+") #extract all numbers in the file name (i.e Study?_G?_T?)
+
+df= as.data.frame(t(as.data.frame(num))) #create a transposed (i.e. "tipped") dataframe of these number
+rownames(df)<-NULL #Remove rownames.
+
+df$V2=as.character(df$V2)
+pairs=as.numeric(unique(df$V2)) #create pairs, i.e. unique group numbers
+
+SurrogateList <- expand.grid(a = pairs, b = pairs) # expand.grid combines all possible combinations of a given vector
+SurrogateList = subset(SurrogateList, a != b) # Ensure that pair 1 (i.e group1) doesn't get paired with it self.
+
+
+# Per each condition
+for (co in c("Synchronous","TurnTaking","Conversation")){ #loop through a list of condintions 
+  for (i in 1:nrow(SurrogateList)){ #and loop through all the pairings of the surrogate list
+    
+  #start recreate filenames from the working directory based on the matching from the surrogatelist
+  f1=paste0('Study2_G',SurrogateList$a[i]) #Insert group numeber from Surrogatelist 
+  f2=paste0('Study2_G',SurrogateList$b[i])
+  
+  file1=prepro_filelist[grepl(f1,prepro_filelist) & grepl(co,prepro_filelist)] #insert conditions as well.
+  file2=prepro_filelist[grepl(f2,prepro_filelist) & grepl(co,prepro_filelist)]
+  
+  d1=read.csv(file1) #Load the recreated filenames
+  
+  d2=read.csv(file2) 
+  
+  #Ensure both dataframes have the same length
+  if (nrow(d1)>nrow(d2)){
+    d1=d1[1:nrow(d2),]
+  } else {
+    d2=d2[1:nrow(d1),]
+  }
+  
+  #creation of surrogate files. (Riccardo's idea of having fun and completely overdoing it ;-) ) 
+  #per each 2 pairs there are 4 possible surrogate pairs: 
+  #pair1person1 w pair2person2; 
+  d3=data.frame(Resp1=d1$Resp1,Resp2=d2$Resp2,HR1=d1$HR1,HR2=d2$HR2,Resp1S=d1$Resp1S,Resp2S=d2$Resp2S,HR1S=d1$HR1S,HR2S=d2$HR2S)
+  #pair1person2 w pair2person2;
+  d4=data.frame(Resp1=d2$Resp1,Resp2=d1$Resp2,HR1=d2$HR1,HR2=d1$HR2,Resp1S=d2$Resp1S,Resp2S=d1$Resp2S,HR1S=d2$HR1S,HR2S=d1$HR2S)
+  
+  #pair1person1 w pair2person1;
+  d5=data.frame(Resp1=d1$Resp1,Resp2=d2$Resp1,HR1=d1$HR1,HR2=d2$HR1,Resp1S=d1$Resp1S,Resp2S=d2$Resp1S,HR1S=d1$HR1S,HR2S=d2$HR1S)
+  #pair1person2 w pair2person2
+  d6=data.frame(Resp1=d2$Resp2,Resp2=d1$Resp2,HR1=d2$HR2,HR2=d1$HR2,Resp1S=d2$Resp2S,Resp2S=d1$Resp2S,HR1S=d2$HR2S,HR2S=d1$HR2S)
+  
+  #Make filenames that tells which pairs have been mixed
+  file3=paste0("Study2_SurrogateGroup",SurrogateList$a[i],"&",SurrogateList$b[i],"a_",co,".csv") 
+  file4=paste0("Study2_SurrogateGroup",SurrogateList$a[i],"&",SurrogateList$b[i],"b_",co,".csv")
+  file5=paste0("Study2_SurrogateGroup",SurrogateList$a[i],"&",SurrogateList$b[i],"c_",co,".csv")
+  file6=paste0("Study2_SurrogateGroup",SurrogateList$a[i],"&",SurrogateList$b[i],"d_",co,".csv")
+  
+  #write csv files
+  write.csv(d3,file.path("surrogate",file3))
+  write.csv(d4,file.path("surrogate",file4))
+  write.csv(d5,file.path("surrogate",file5))
+  write.csv(d6,file.path("surrogate",file6))
+  }
+}
+```
+
+```{r s_crqa functions}
+
+s_crqa_heart=function(alma) {
+  adat=read.csv(alma)
+  Results=crqa (adat$HR1S, adat$HR2S, delay=delay_h, embed=emddim_h, radius=radius_h, normalize=0,rescale=0,mindiagline = 2,minvertline = 2)
+  
+  RR= Results$RR
+  DET= Results$DET
+  maxL=Results$maxL
+  L=Results$L
+  ENTR=Results$ENTR
+  LAM=Results$LAM
+  TT=Results$TT
+  
+  final_heart=data.frame(RR, DET, maxL, L, ENTR, LAM, TT)
+  
+  return(final_heart)
+
+}
+
+s_crqa_resp=function(alma) {
+  adat=read.csv(alma)
+  Results=crqa (adat$Resp1S, adat$Resp2S, delay=delay_r, embed=emddim_r, radius=radius_r, normalize=0,rescale=0,mindiagline = 2,minvertline = 2)
+  
+  RR= Results$RR
+  DET= Results$DET
+  maxL=Results$maxL
+  L=Results$L
+  ENTR=Results$ENTR
+  LAM=Results$LAM
+  TT=Results$TT
+  
+  final_resp=data.frame(RR, DET, maxL, L, ENTR, LAM, TT)
+  
+  
+  return(final_resp)
+
+}
+
+#test
+# ghost=s_crqa_heart("new_cleandata/new_Study2_G9_T3_TurnTaking.csv")
+# monster=s_crqa_resp("new_cleandata/new_Study2_G9_T3_TurnTaking.csv")
+
+```
+ 
+ - Run crqa on all the surrogate pairs and save the output. NB. which delay, embed, radius parameters should you use?
+ - Test whether crqa shows a difference between real and surrogate pairs
+ 
+ 
+```{r surrogate loop}
+
+#loop for crqa of surrogate files
+file_list = list.files(path= "surrogate", full.names=T)
+
+
+heart_surrogate=data.frame()
+resp_surrogate= data.frame()
+
+for (i in file_list){
+  basic=get_name_sur(i)
+  hr=s_crqa_heart(i)
+  all=cbind(basic, hr)
+  heart_surrogate= rbind(heart_surrogate, all)
+  
+  
+  basicr=get_name_sur(i)
+  re=s_crqa_resp(i)
+  allr=cbind(basicr, re)
+  resp_surrogate= rbind(resp_surrogate, allr)
+  rm(all)
+  rm(allr)
+}
+
+write.csv(heart_surrogate, file="heart_surrogate.csv", row.names = F)
+write.csv(resp_surrogate, file="resp_surrogate.csv", row.names = F)
+
+```
+
+
+Statistically compare...
+
+```{r}
+heart_surrogate=read.csv("heart_surrogate.csv")
+resp_surrogate=read.csv("resp_surrogate.csv")
+
+heart_surrogate$type= factor("surrogate")
+resp_surrogate$type= factor("surrogate")
+
+heart_surrogate_mod=heart_surrogate
+heart_surrogate_mod$group= paste(heart_surrogate_mod$group_1, heart_surrogate_mod$group_2)
+heart_surrogate_mod$group=as.factor(heart_surrogate_mod$group)
+heart_surrogate_mod= subset(heart_surrogate_mod, select= -c(group_1, group_2, combination))
+heart_normal_mod= subset(heart_normal, select= -c(trial))
+
+resp_surrogate_mod=resp_surrogate
+resp_surrogate_mod$group= paste(resp_surrogate_mod$group_1, resp_surrogate_mod$group_2)
+resp_surrogate_mod$group=as.factor(resp_surrogate_mod$group)
+resp_surrogate_mod= subset(resp_surrogate_mod, select= -c(group_1, group_2, combination))
+resp_normal_mod= subset(resp_normal, select= -c(trial))
+
+heart_normal_surrogate= rbind(heart_surrogate_mod, heart_normal_mod)
+resp_normal_surrogate= rbind(resp_surrogate_mod, resp_normal_mod)
+
+#relevel to have normal as baseline
+heart_normal_surrogate$type= relevel(heart_normal_surrogate$type, "normal", "surrogate")
+resp_normal_surrogate$type= relevel(resp_normal_surrogate$type, "normal", "surrogate")
+
+library(lmerTest)
+
+RR_h_lmer=lmer(RR ~ type + (1|group), heart_normal_surrogate)
+RR_r_lmer=lmer(RR ~ type + (1|group), resp_normal_surrogate)
+
+summary(RR_h_lmer) #0.01269    0.77525 82.73000   0.016    0.987
+summary(RR_r_lmer) #0.05708    0.11816 172.19000   0.483     0.63 
+
+DET_h_lmer=lmer(DET ~ type + (1|group), heart_normal_surrogate)
+DET_r_lmer=lmer(DET ~ type + (1|group), resp_normal_surrogate)
+
+summary(DET_h_lmer) #-0.5071     0.9208  99.9800  -0.551    0.583
+summary(DET_r_lmer)  #-0.07856    2.07370  90.50000  -0.038     0.97
+
+LAM_h_lmer=lmer(LAM ~ type + (1|group), heart_normal_surrogate)
+LAM_r_lmer=lmer(LAM ~ type + (1|group), resp_normal_surrogate)
+
+summary(LAM_h_lmer) #-0.01492    0.60093 135.25000  -0.025     0.98
+summary(LAM_r_lmer) #0.6963     1.3613 142.2900   0.512     0.61
+
+L_h_lmer=lmer(L ~ type + (1|group), heart_normal_surrogate)
+L_r_lmer=lmer(L ~ type + (1|group), resp_normal_surrogate)
+
+summary(L_h_lmer) #0.2431     1.2304 129.3100   0.198    0.844 
+summary(L_r_lmer) # -0.04365    0.11425 104.04000  -0.382    0.703
+
+maxL_h_lmer=lmer(maxL ~ type + (1|group), heart_normal_surrogate)
+maxL_r_lmer=lmer(maxL ~ type + (1|group), resp_normal_surrogate)
+
+summary(maxL_h_lmer) # -6.111     22.151  71.370  -0.276    0.783
+summary(maxL_r_lmer) #  0.1911     1.9475 117.7100   0.098    0.922  
+
+ENTR_h_lmer=lmer(ENTR ~ type + (1|group), heart_normal_surrogate)
+ENTR_r_lmer=lmer(ENTR ~ type + (1|group), resp_normal_surrogate)
+
+summary(ENTR_h_lmer) #-0.02217    0.08912 102.94000  -0.249    0.804 
+summary(ENTR_r_lmer) #-0.02013    0.05696 108.41000  -0.353    0.725
+
+TT_h_lmer=lmer(TT ~ type + (1|group), heart_normal_surrogate)
+TT_r_lmer=lmer(TT ~ type + (1|group), resp_normal_surrogate)
+
+summary(TT_h_lmer) # 1.345      1.950 169.250   0.690    0.491
+summary(TT_r_lmer) # 0.03624    0.19299 155.63000   0.188    0.851 
+
+#no significant!
+```
+
+
+### Testing effects of conditions
+ - make a (probably underpowered) mixed model testing effects of the different conditions on heart rate and respiration coordination
+ - N.B: would it make sense to include surrogate pairs? and if so how? what would that tell you?
+ 
+question 3: do interaction between condition and baseline
+condition: sync, turn, conversation
+type: real, shuffled, surrogated 
+-> y ~ C*type 
+ 
+```{r}
+
+RR_h_int=lmer(RR ~ condition*type + (1|group), heart_normal_shuffled)
+RR_r_int=lmer(RR ~ condition*type + (1|group), resp_normal_shuffled)
+
+summary(RR_h_int)
+#  Estimate Std. Error      df t value Pr(>|t|)
+# conditionSynchronous:typeshuffled  -1.0483     1.1896 31.2300  -0.881 0.384959
+# conditionTurnTaking:typeshuffled   -0.4290     1.1896 31.2300  -0.361 0.720821
+
+summary(RR_r_int) 
+# conditionSynchronous:typeshuffled -0.21982    0.28794 30.78000  -0.763    0.451    
+# conditionTurnTaking:typeshuffled   0.05653    0.28794 30.78000   0.196    0.846  
+
+DET_h_int=lmer(DET ~ condition*type + (1|group), heart_normal_shuffled)
+DET_r_int=lmer(DET ~ condition*type + (1|group), resp_normal_shuffled)
+
+summary(DET_h_int)
+# conditionSynchronous:typeshuffled   0.9195     1.7066  19.0850   0.539    0.596    
+# conditionTurnTaking:typeshuffled    1.4063     1.8188  19.9570   0.773    0.448  
+
+summary(DET_r_int)
+# conditionSynchronous:typeshuffled  -4.66522    3.79801  31.63000  -1.228   0.2284    
+# conditionTurnTaking:typeshuffled   -0.69464    3.79801  31.63000  -0.183   0.8560  
+
+LAM_h_int=lmer(LAM ~ condition*type + (1|group), heart_normal_shuffled)
+LAM_r_int=lmer(LAM ~ condition*type + (1|group), resp_normal_shuffled)
+
+summary(LAM_h_int)
+# conditionSynchronous:typeshuffled   0.4199     1.1310  31.5800    0.371    0.713    
+# conditionTurnTaking:typeshuffled    1.0347     1.1310  31.5800    0.915    0.367
+
+summary(LAM_r_int)
+# conditionSynchronous:typeshuffled   -1.288      3.119  31.200  -0.413    0.682    
+# conditionTurnTaking:typeshuffled    -1.294      3.119  31.200  -0.415    0.681
+
+L_h_int=lmer(L ~ condition*type + (1|group), heart_normal_shuffled)
+L_r_int=lmer(L ~ condition*type + (1|group), resp_normal_shuffled)
+
+summary(L_h_int)
+# conditionSynchronous:typeshuffled -0.06999    1.65383 31.07000  -0.042    0.967    
+# conditionTurnTaking:typeshuffled   0.66605    1.65383 31.07000   0.403    0.690
+
+summary(L_r_int)
+# conditionSynchronous:typeshuffled -0.56119    0.22142 31.37000  -2.535  0.01646 *  
+# conditionTurnTaking:typeshuffled  -0.06176    0.22142 31.37000  -0.279  0.78213 
+
+maxL_h_int=lmer(maxL ~ condition*type + (1|group), heart_normal_shuffled)
+maxL_r_int=lmer(maxL ~ condition*type + (1|group), resp_normal_shuffled)
+
+summary(maxL_h_int)
+# conditionSynchronous:typeshuffled  -32.750     42.838   31.210  -0.765    0.450    
+# conditionTurnTaking:typeshuffled     8.250     42.838   31.210   0.193    0.849
+
+summary(maxL_r_int)
+# conditionSynchronous:typeshuffled   -4.375      4.388  31.380  -0.997    0.326    
+# conditionTurnTaking:typeshuffled    -1.625      4.388  31.380  -0.370    0.714 
+
+ENTR_h_int=lmer(ENTR ~ condition*type + (1|group), heart_normal_shuffled)
+ENTR_r_int=lmer(ENTR ~ condition*type + (1|group), resp_normal_shuffled)
+
+summary(ENTR_h_int)
+# conditionSynchronous:typeshuffled  0.07183    0.18131 19.10600   0.396    0.696    
+# conditionTurnTaking:typeshuffled   0.09296    0.19333 19.93000   0.481    0.636
+
+summary(ENTR_r_int)
+# conditionSynchronous:typeshuffled -0.26581    0.10587 31.45000  -2.511  0.01740 *  
+# conditionTurnTaking:typeshuffled  -0.03825    0.10587 31.45000  -0.361  0.72030 
+
+TT_h_int=lmer(TT ~ condition*type + (1|group), heart_normal_shuffled)
+TT_r_int=lmer(TT ~ condition*type + (1|group), resp_normal_shuffled)
+
+summary(TT_h_int)
+# conditionSynchronous:typeshuffled  -0.06821    1.99905  30.19000  -0.034    0.973    
+# conditionTurnTaking:typeshuffled    1.77831    2.03347  30.31000   0.875    0.389
+
+summary(TT_r_int)
+# conditionSynchronous:typeshuffled  -0.7952     0.3729 31.1500  -2.133  0.04095 *  
+# conditionTurnTaking:typeshuffled   -0.1382     0.3729 31.1500  -0.371  0.71337
+
+
+```
+
+### Effects of respiration coordination on heart rate coordination
+ - describe how you would test those.
+ - Optional: run the models and report them
+ 
+ 
+ model1=heartrate~ condition
+ model2=heartrate ~ condition + respiration
+ anova(model1, model2)
+ See whether adding respiration as a predictor made the model significantly better
+ 
+
+ 
+ 
+ 
+ 
+ 
